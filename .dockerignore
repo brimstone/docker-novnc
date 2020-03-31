@@ -1,4 +1,5 @@
-*.exe
+/.git
+/gowebsockify.exe
 /gowebsockify
 /assets
 /internal/assetfs

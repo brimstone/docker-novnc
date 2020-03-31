@@ -1,23 +1,5 @@
-# Websockify implementation in Golang
+# websockify
 
-Websockify : https://github.com/novnc/websockify
+Websockify implementation in Go.
 
-## Build
-
-``` bash
-go get -d
-go build
-```
-
-## Usage
-
-- Edit `config.toml`.
-- `./go-websockify`
-
-### run as daemon (windows service
-
-`go-websockify.exe install &&  go-websockify.exe start`
-
-# License
-
-MIT License
+This repo also contains the bits to build a Docker image with a vnc server.

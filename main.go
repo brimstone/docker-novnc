@@ -1,39 +1,30 @@
 package main
 
 import (
+	"flag"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
 	"os"
-	"path/filepath"
+	"os/exec"
+	"strconv"
 
-	"github.com/BurntSushi/toml"
+	"github.com/brimstone/gowebsockify/internal/assetfs"
+	"github.com/brimstone/logger"
 	"github.com/gorilla/websocket"
-	"github.com/kardianos/service"
+	"golang.org/x/tools/godoc/vfs/httpfs"
 )
 
 type Config struct {
-	ListenPort int    `toml:"port"`
-	VNCAddr    string `toml:"vnc"`
+	ListenPort int
+	VNCAddr    string
 }
 
 var (
-	config  Config
-	slogger service.Logger
+	config Config
 )
 
 type program struct{}
-
-func (p *program) Start(s service.Service) error {
-	go run()
-	return nil
-}
-
-func (p *program) Stop(s service.Service) error {
-	// TODO
-	return nil
-}
 
 var wsupgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
@@ -44,6 +35,7 @@ var wsupgrader = websocket.Upgrader{
 }
 
 func wsToTCP(wsConn *websocket.Conn, tcpConn net.Conn) chan error {
+	log := logger.New()
 	done := make(chan error, 2)
 	go func() {
 		defer wsConn.Close()
@@ -93,10 +85,15 @@ func tcpToWs(tcpConn net.Conn, wsConn *websocket.Conn) chan error {
 }
 
 func handleProxyConnection(w http.ResponseWriter, r *http.Request) {
-	slogger.Infof("Connected. remote: %s", r.RemoteAddr)
+	log := logger.New()
+	log.Info("Connected.",
+		log.Field("remote", r.RemoteAddr),
+	)
 	conn, err := wsupgrader.Upgrade(w, r, http.Header{"Sec-WebSocket-Protocol": {"binary"}})
 	if err != nil {
-		slogger.Error(err)
+		log.Error("Upgrade error",
+			log.Field("err", err),
+		)
 		return
 	}
 	defer conn.Close()
@@ -119,46 +116,46 @@ func handleProxyConnection(w http.ResponseWriter, r *http.Request) {
 }
 
 func run() {
-	http.HandleFunc("/websockify", handleProxyConnection)
+	log := logger.New()
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/websockify", handleProxyConnection)
+	mux.Handle("/", http.FileServer(httpfs.New(assetfs.New())))
 
 	listenAddr := ":" + fmt.Sprint(config.ListenPort)
-	slogger.Infof("start server on %s", listenAddr)
-	http.ListenAndServe(listenAddr, nil)
+	log.Info("start server",
+		log.Field("address", listenAddr),
+	)
+	http.ListenAndServe(listenAddr, logger.HTTP(mux))
 }
 
 func main() {
-	dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
-	_, err = toml.DecodeFile(dir+"/config.toml", &config)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	svcConfig := &service.Config{
-		Name:        "Websockify",
-		DisplayName: "Websockify service for noVNC.",
-		Description: "WebSocket to TCP proxy.",
-	}
-
-	s, err := service.New(&program{}, svcConfig)
-	if err != nil {
-		log.Fatal(err)
-	}
-	slogger, err = s.Logger(nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if len(os.Args) > 1 {
-		err = service.Control(s, os.Args[1])
+	log := logger.New()
+	var err error
+	config.ListenPort = 9000
+	if p := os.Getenv("PORT"); p != "" {
+		config.ListenPort, err = strconv.Atoi(p)
 		if err != nil {
-			log.Fatal(err)
-		}
-		return
-	} else {
-		err = s.Run()
-		if err != nil {
-			slogger.Error(err)
+			panic(err)
 		}
 	}
+	flag.StringVar(&config.VNCAddr, "vnc", "127.0.0.1:5900", "host:port for vnc server")
+	flag.IntVar(&config.ListenPort, "port", config.ListenPort, "Port for listening")
+	flag.Parse()
+
+	args := flag.Args()
+	if len(args) == 0 {
+		run()
+		return
+	}
+	go run()
+	cmd := exec.Command(args[0], args[1:]...)
+	err = cmd.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("Waiting for command to finish...")
+	err = cmd.Wait()
+	log.Printf("Command finished with error: %v", err)
+
 }

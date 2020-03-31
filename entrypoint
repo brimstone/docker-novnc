@@ -1,0 +1,4 @@
+#!/bin/bash
+echo -e "$VNC_PASSWD\n$VNC_PASSWD\n\n" | vncpasswd
+
+exec /gowebsockify /usr/bin/vncserver :0 -fg -depth 24
